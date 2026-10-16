@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Private Group Chat App</title>
+  <style>
+    * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; }
+    body { background-color: #d1d7db; display: flex; justify-content: center; height: 100vh; }
+    .chat-container { width: 100%; max-width: 480px; background: #efeae2; display: flex; flex-direction: column; height: 100vh; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    .header { background: #075e54; color: white; padding: 12px 15px; text-align: center; font-weight: bold; font-size: 18px; }
+    .admin-panel { background: #128c7e; color: white; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+    .admin-btn { background: #25d366; color: #000; font-weight: bold; border: none; padding: 6px 12px; border-radius: 15px; cursor: pointer; }
+    .role-bar { background: #054740; color: #e9edef; padding: 6px 15px; font-size: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .switch-btn { background: #34b7f1; color: white; border: none; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+    .messages { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .msg { background: #ffffff; padding: 8px 12px; border-radius: 8px; width: fit-content; max-width: 80%; box-shadow: 0 1px 0.5px rgba(0,0,0,0.13); font-size: 14px; line-height: 1.4; word-break: break-word; }
+    .msg.mine { background: #dcf8c6; align-self: flex-end; }
+    .msg .sender { font-size: 10px; color: #075e54; font-weight: bold; display: block; margin-bottom: 2px; }
+    .input-area { display: flex; padding: 10px; background: #f0f0f0; align-items: center; }
+    input[type="text"] { flex: 1; padding: 10px 15px; border: 1px solid #ccc; border-radius: 20px; outline: none; font-size: 14px; }
+    .send-btn { margin-left: 8px; padding: 10px 18px; background: #075e54; color: white; border: none; border-radius: 20px; cursor: pointer; font-weight: bold; }
+  </style>
+
+  <!-- Firebase JavaScript SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+</head>
+<body>
+
+<div class="chat-container">
+  <div class="header">Private Chat Group</div>
+  
+  <!-- ADMIN TRIGGER CONTROL BAR -->
+  <div class="admin-panel">
+    <span>Read Trigger:</span>
+    <button class="admin-btn" id="toggleBtn" onclick="toggleReadAccess()">Loading...</button>
+  </div>
+
+  <div class="role-bar">
+    <span>ID: <b id="userDisplay"></b> | Role: <b id="roleDisplay">User</b></span>
+    <button class="switch-btn" onclick="switchRole()">Switch Admin/User</button>
+  </div>
+
+  <div class="messages" id="msgBox"></div>
+
+  <div class="input-area">
+    <input type="text" id="msgInput" placeholder="Type a message..." onkeydown="if(event.key==='Enter') sendMessage()">
+    <button class="send-btn" onclick="sendMessage()">Send</button>
+  </div>
+</div>
+
+<script>
+  // ==========================================
+  // APNI FIREBASE CONFIG YAHAN PASTE KAREIN:
+  // ==========================================
+  const firebaseConfig = {
+  apiKey: "AIzaSyA1WTO5p3C6Nh_rYgLDF3M8qAP0RLTn59U",
+  authDomain: "party-function-group.firebaseapp.com",
+  databaseURL: "https://party-function-group-default-rtdb.firebaseio.com",
+  projectId: "party-function-group",
+  storageBucket: "party-function-group.firebasestorage.app",
+  messagingSenderId: "131513198868",
+  appId: "1:131513198868:web:d8a6d82758edc1caa7ba01"
+};
+  // ==========================================
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  // Unique User Identification
+  let currentUserId = localStorage.getItem('chat_uid');
+  if(!currentUserId) {
+    currentUserId = 'User_' + Math.floor(1000 + Math.random() * 9000);
+    localStorage.setItem('chat_uid', currentUserId);
+  }
+  document.getElementById('userDisplay').innerText = currentUserId;
+
+  let isAdmin = false;
+  let canUserRead = false;
+
+  // Realtime Admin Control Trigger Listener
+  db.ref('settings/canRead').on('value', (snapshot) => {
+    canUserRead = snapshot.val() || false;
+    const toggleBtn = document.getElementById('toggleBtn');
+    if(canUserRead) {
+      toggleBtn.innerText = "READ ENABLED (Click OFF)";
+      toggleBtn.style.background = "#ff4b4b";
+      toggleBtn.style.color = "#fff";
+    } else {
+      toggleBtn.innerText = "READ DISABLED (Click ON)";
+      toggleBtn.style.background = "#25d366";
+      toggleBtn.style.color = "#000";
+    }
+    loadMessages();
+  });
+
+  // Load and Filter Messages Realtime
+  function loadMessages() {
+    db.ref('messages').on('value', (snapshot) => {
+      const msgBox = document.getElementById('msgBox');
+      msgBox.innerHTML = '';
+      const data = snapshot.val();
+      
+      if(data) {
+        Object.keys(data).forEach(key => {
+          const msg = data[key];
+          const isMyMsg = (msg.sender === currentUserId);
+          
+          // Rules Logic:
+          // 1. Admin saare msg dekhega.
+          // 2. User apna msg hamesha dekhega.
+          // 3. Dusron ke msgs tabhi dikhenge jab Admin 'canUserRead' ON karega.
+          if(isAdmin || isMyMsg || canUserRead) {
+            const div = document.createElement('div');
+            div.className = 'msg ' + (isMyMsg ? 'mine' : '');
+            div.innerHTML = `<span class="sender">${msg.sender}</span>${msg.text}`;
+            msgBox.appendChild(div);
+          }
+        });
+        msgBox.scrollTop = msgBox.scrollHeight;
+      }
+    });
+  }
+
+  // Send Message Function
+  function sendMessage() {
+    const input = document.getElementById('msgInput');
+    const text = input.value.trim();
+    if(text === '') return;
+
+    db.ref('messages').push({
+      sender: currentUserId,
+      text: text,
+      timestamp: Date.now()
+    });
+
+    input.value = '';
+  }
+
+  // Admin Toggle Function
+  function toggleReadAccess() {
+    if(!isAdmin) {
+      alert("Aap abhi Admin mode me nahi hain! 'Switch Admin/User'
